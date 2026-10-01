@@ -1,0 +1,5 @@
+__pycache__/
+*.py[cod]
+/bot-tester/tournament-results.json
+/bot-tester/bots/*_bot.py
+*.pdf
