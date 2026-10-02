@@ -1,6 +1,7 @@
 """Paired-seed local tournament for simultaneous tic-tac-toe."""
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
 from itertools import combinations
@@ -93,32 +94,40 @@ def request_move(path, view, timeout=DEFAULT_TIMEOUT, bot_seed="0"):
 
 def _derived_seed(master, pair, seed_index, label):
     context = f"{pair[0]}|{pair[1]}|{seed_index}|{label}".encode("ascii")
-    return hashlib.blake2b(context, key=bytes.fromhex(master), digest_size=16).hexdigest()
+    return hashlib.blake2b(context, key=bytes.fromhex(master), digest_size=32).hexdigest()
 
 
 def play_game(first, second, timeout=DEFAULT_TIMEOUT, coin_seed=0,
-              bot_seed_for=None):
+              bot_seed_for=None, move_provider=None, game_id=None):
     """Collect both sealed choices before resolving a round; O=first, X=second."""
     state = GameState()
     bots = {1: first, 2: second}
     rng = random.Random(coin_seed)
-    game = {"first": first.stem, "second": second.stem, "rounds": []}
+    game = {"first": first.stem, "second": second.stem, "rounds": [],
+            "game_id": game_id or f"O:{first.stem}|X:{second.stem}"}
+    provider = move_provider or request_move
     while state.winner() == 0:
         # These are copies of the SAME pre-round state. No bot learns the other
         # bot's current choice before committing its own.
         views = {player: state.view_for(player) for player in (1, 2)}
         choices = {}
         errors = {}
-        for player in (1, 2):
-            move, error = request_move(
-                bots[player], views[player], timeout,
-                bot_seed_for(bots[player].stem, state.round_number) if bot_seed_for else "0",
-            )
-            choices[player] = move
-            if error is None and not state.valid_action(Action(move)):
-                error = f"illegal action: {move}"
-            if error is not None:
-                errors[player] = error
+        # Launch both workers before reading either reply.
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            pending = {
+                player: executor.submit(
+                    provider, bots[player], views[player], timeout,
+                    bot_seed_for(bots[player].stem, state.round_number) if bot_seed_for else "0",
+                )
+                for player in (1, 2)
+            }
+            for player in (1, 2):
+                move, error = pending[player].result()
+                choices[player] = move
+                if error is None and not state.valid_action(Action(move)):
+                    error = f"illegal action: {move}"
+                if error is not None:
+                    errors[player] = error
         if errors:
             game["forfeits"] = [bots[player].stem for player in errors]
             game["errors"] = {bots[player].stem: error for player, error in errors.items()}
@@ -212,11 +221,13 @@ def standings_for(names, games, paired_rounds=DEFAULT_PAIRED_ROUNDS, quality=Non
 
 
 def run_tournament(paths, timeout=DEFAULT_TIMEOUT, paired_rounds=DEFAULT_PAIRED_ROUNDS,
-                   seed=None, quality=None):
+                   seed=None, quality=None, move_provider=None, strict_seed=False):
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("timeout must be positive and finite")
     if type(paired_rounds) is not int or paired_rounds <= 0:
         raise ValueError("paired_rounds must be a positive integer")
+    if strict_seed and seed is not None:
+        raise ValueError("official events generate their own secret seed")
     if seed is None:
         seed = secrets.token_hex(32)
     elif type(seed) is not str or not seed:
@@ -240,15 +251,20 @@ def run_tournament(paths, timeout=DEFAULT_TIMEOUT, paired_rounds=DEFAULT_PAIRED_
     for first, second in combinations(bots, 2):
         pair = (first.stem, second.stem)
         for index in range(paired_rounds):
-            coin_seed = int(_derived_seed(seed, pair, index, "referee"), 16)
-            def bot_seed_for(name, round_number):
-                return _derived_seed(seed, pair, index, f"bot|{name}|{round_number}")
             for o, x in ((first, second), (second, first)):
-                game = play_game(o, x, timeout, coin_seed, bot_seed_for)
+                seat = f"O:{o.stem}|X:{x.stem}"
+                game_id = f"{first.stem}|{second.stem}|{index}|{seat}"
+                coin_seed = int(_derived_seed(seed, pair, index,
+                                              f"referee|{seat}"), 16)
+                def bot_seed_for(name, round_number):
+                    return _derived_seed(seed, pair, index,
+                                         f"bot|{seat}|{name}|{round_number}")
+                game = play_game(o, x, timeout, coin_seed, bot_seed_for,
+                                 move_provider=move_provider, game_id=game_id)
                 game["pair_index"] = index
                 games.append(game)
     return {
-        "rules": "simultaneous-coin-v1",
+        "rules": "simultaneous-coin-v2",
         "timeout_seconds": timeout,
         "paired_rounds": paired_rounds,
         "tournament_seed": seed,
@@ -280,7 +296,7 @@ def main():
             if args.log.resolve() == args.rescore.resolve():
                 parser.error("--log must differ from the existing results file")
             results = json.loads(args.rescore.read_text(encoding="utf-8"))
-            if results.get("rules") != "simultaneous-coin-v1":
+            if results.get("rules") != "simultaneous-coin-v2":
                 raise ValueError("results use another game version")
             names = [row["name"] for row in results["standings"]]
             results["standings"] = standings_for(
