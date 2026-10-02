@@ -23,25 +23,25 @@ There is no first move: O and X are merely labels so the match log can show both
 
 ## Your bot
 
-Submit a **single Python script** named `teamname_bot.py`. See [example-bot.py](example-bot.py), or start from the random bot in `bot-tester/bots/`. Define a `Player` class with `act(gamestate)` and set `self.action = Action(i)` for an **integer** square `i` from `0` through `8` where `gamestate.pieces[i] == 0`. One new `Player` object is made **each round**, so do not rely on its fields to remember earlier rounds.
+Submit a **single Python script** named `teamname_bot.py`. See [example-bot.py](example-bot.py), or start from any bot in `bot-tester/bots/`. Define a `Player` class with `act(gamestate)` and set `self.action = Action(i)` for an **integer** square `i` from `0` through `8` where `gamestate.pieces[i] == 0`. One new `Player` object is made **each round**, so do not rely on its fields to remember earlier rounds.
+
+New to Python or classes? Read [PYTHON_BASICS.md](PYTHON_BASICS.md) first. You do **not** need `threading` or `super().__init__()` — the runner simply calls `run()`.
 
 The smallest working bot looks like this:
 
 ```python
-from threading import Thread
 from Action import Action
 
-class Player(Thread):
-    def __init__(self, *args):
-        super().__init__()
-        self.args = args
+class Player:
+    def __init__(self, gamestate):
+        self.gamestate = gamestate
         self.action = Action(-1)
+
+    def run(self):
+        self.act(self.gamestate)
 
     def act(self, gamestate):
         self.action = Action(gamestate.pieces.index(0))
-
-    def run(self):
-        self.act(self.args[0])
 ```
 
 It always picks the first free square. It is legal, but predictable and easy to beat.
@@ -52,6 +52,18 @@ It always picks the first free square. It is legal, but predictable and easy to 
 | `gamestate.round_number` | Number of completed rounds, beginning at `0`. |
 
 Bot standard output is suppressed. The example bot averages the result of a choice over the opponent's possible choices, treating a same-square coin as 50/50; it is a starting point, not a perfect strategy. Plain alternating-turn tic-tac-toe minimax does **not** model simultaneous choices or the referee's coin.
+
+## Reference bots and hints
+
+`bot-tester/bots/` contains a small ladder, easiest first. Play against them, beat them, then climb. Read [HINTS.md](HINTS.md) for the ideas behind each rung and how to go beyond them.
+
+| Bot | Idea | Its weakness |
+| --- | --- | --- |
+| `random-bot.py` | pick any empty square | no plan at all |
+| `first-empty-bot.py` | always the lowest empty square | completely predictable |
+| `greedy-bot.py` | build your own lines, ignore the opponent | no defence |
+| `win-block-bot.py` | win if you can, else collide with their winning square | a collision is only a 50/50 coin |
+| `tactical-bot.py` | average over the opponent's moves and the coin | looks only one round ahead |
 
 ## Test locally
 
@@ -81,9 +93,11 @@ The sample bots use only the Python standard library; no third-party package is 
 
 ## Judging
 
-**80 points: game performance.** Each game awards 1 for a win, 0.5 for a draw, and 0 for a loss; a double forfeit gives 0 to both. Each entrant faces every other entrant for the same number of paired games. Performance points are scaled to 80 using the maximum available game points. Seeded referee coins and both choices are logged. Bot randomness outside the referee's control may change outcomes on a rerun, so the official recorded games count.
+**Performance (primary).** Each game awards 1 for a win, 0.5 for a draw, and 0 for a loss; a double forfeit gives 0 to both. Every entrant plays every other entrant for the same number of paired games (both O and X). Your **performance** is your average points per game.
 
-**20 points: code and PDF**, using the same rubric for everyone:
+**Ranking is banded.** Because the coin adds luck, two bots whose performances differ by less than the tournament's statistical noise band are treated as **tied on performance**. The band shrinks as more games are played. Within a tied band, the code/PDF quality score decides the order. A bot in a strictly better band always outranks one in a worse band, so a nicer write-up can never overtake a clearly stronger bot. Genuinely equal bots still tie — that is expected, and is exactly what the quality score is for.
+
+**Quality (0–20), used to order bots within a performance band.** Same rubric for everyone:
 
 | Criterion | Points | What we look for |
 | --- | ---: | --- |
@@ -92,7 +106,7 @@ The sample bots use only the Python standard library; no third-party package is 
 | Testing and iteration | 0–4 | Evidence of trying different situations, learning from failures and checking edge cases. |
 | Clarity and robustness | 0–4 | Understandable code and reliable decisions within the announced limits. |
 
-The final score is **performance / 80 + quality / 20**. If final scores tie, use higher game points, then points against bots tied on game points, then wins, then fewest forfeits; any remaining tie shares a rank. The organizer records the quality subscores and brief reasons, and publishes results and match logs. A short strategy walkthrough may be requested to clarify a submission; eloquence and code length are not scoring criteria.
+Remaining ties (same band and quality): head-to-head points, then wins, then fewest forfeits, then a shared rank. The organizer records the quality subscores and brief reasons, and publishes results and match logs. A short strategy walkthrough may be requested to clarify a submission; eloquence and code length are not scoring criteria.
 
 ## Submission details
 

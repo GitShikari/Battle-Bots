@@ -1,21 +1,26 @@
-"""Small baseline bot: commit to one empty square each round."""
+"""Reference rung 0 (easiest): pick any empty square at random.
+
+This is the simplest legal bot. It never plans ahead, so almost any thoughtful
+opponent beats it. Use it to check that your setup works, then move on.
+
+See example-bot.py for a line-by-line explanation of the Player class.
+"""
 
 import random
-from threading import Thread
 
 from Action import Action
 
 
-class Player(Thread):
-    def __init__(self, *args):
-        super().__init__()
-        self.args = args
+class Player:
+    def __init__(self, gamestate):
+        self.gamestate = gamestate
         self.action = Action(-1)
 
-    def act(self, gamestate):
-        # Both bots choose from the same pre-round board, even if they collide.
-        open_squares = [i for i, piece in enumerate(gamestate.pieces) if piece == 0]
-        self.action = Action(random.choice(open_squares))
-
     def run(self):
-        self.act(self.args[0])
+        self.act(self.gamestate)
+
+    def act(self, gamestate):
+        # Collect the free squares, then pick one at random.
+        empty = [i for i in range(9) if gamestate.pieces[i] == 0]
+        # HINT: random is legal but planless. Beating this is the first rung.
+        self.action = Action(random.choice(empty))

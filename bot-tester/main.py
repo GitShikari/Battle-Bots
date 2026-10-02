@@ -24,10 +24,14 @@ from Action import Action
 from GameState import GameState
 
 DEFAULT_TIMEOUT = 2.5  # Wall-clock seconds per choice, including worker startup.
-DEFAULT_PAIRED_ROUNDS = 10  # 20 games per unordered pair.
+DEFAULT_PAIRED_ROUNDS = 10  # 20 games per pair locally; the official referee uses far more.
+DEFAULT_WORKERS = 1  # Games played in parallel; the official referee raises this.
+BAND_Z = 2.8  # ~95% confidence, ~80% power for the two-bot performance gap.
+BAND_SIGMA = 0.5  # Conservative per-game spread (points are 0/0.5/1).
 OUTPUT_LIMIT = 8192
 BOT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,59}\.py\Z")
 QUALITY_CATEGORIES = {"generality": 6, "reasoning": 6, "testing": 4, "clarity": 4}
+SCORING = "banded-v1"
 
 
 def _safe_message(value):
@@ -168,15 +172,30 @@ def validate_quality(names, quality):
     return validated
 
 
+def band_half_width(games_per_bot, band_z=BAND_Z, band_sigma=BAND_SIGMA):
+    """Half-width of the statistically indistinguishable performance band."""
+    if games_per_bot <= 0:
+        return float("inf")
+    return band_z * band_sigma * math.sqrt(2.0 / games_per_bot)
+
+
 def standings_for(names, games, paired_rounds=DEFAULT_PAIRED_ROUNDS, quality=None):
-    """Calculate performance (80) and optional human-scored quality (20)."""
+    """Rank by performance band, then by human-scored quality within the band.
+
+    Bots whose average points per game are within the tournament's noise band
+    are statistically tied; quality then decides their order. A bot in a
+    strictly higher band always outranks a lower one, so a nicer write-up
+    cannot overtake a clearly stronger bot.
+    """
     quality = validate_quality(names, quality)
-    records = {name: dict(points=0.0, wins=0, draws=0, losses=0, forfeits=0)
+    records = {name: dict(points=0.0, wins=0, draws=0, losses=0, forfeits=0, played=0)
                for name in names}
     pair_points = {name: {other: 0.0 for other in names if other != name}
                    for name in names}
     for game in games:
         first, second, winner = game["first"], game["second"], game["winner"]
+        records[first]["played"] += 1
+        records[second]["played"] += 1
         if game["reason"] == "double_forfeit":
             for name in (first, second):
                 records[name]["losses"] += 1
@@ -196,36 +215,54 @@ def standings_for(names, games, paired_rounds=DEFAULT_PAIRED_ROUNDS, quality=Non
                 records[loser]["forfeits"] += 1
 
     for name in names:
-        tied = [other for other in names if records[other]["points"] == records[name]["points"]]
-        records[name]["head_to_head"] = sum(pair_points[name][other] for other in tied
-                                            if other != name)
         record = records[name]
-        record["performance_score"] = 80 * record["points"] / (2 * paired_rounds * (len(names) - 1))
+        record["performance"] = record["points"] / (record["played"] or 1)
         record["quality"] = quality[name] if quality is not None else None
         record["quality_score"] = sum(quality[name].values()) if quality is not None else None
-        record["total_score"] = (record["performance_score"] + record["quality_score"]
-                                 if quality is not None else None)
+
+    # Band the bots by performance. The leader of each band is fixed, so a
+    # long chain of tiny gaps does not merge the whole field into one band.
+    by_performance = sorted(names, key=lambda name: (-records[name]["performance"], name))
+    band = band_half_width(min((records[name]["played"] for name in names), default=0))
+    band_of, current, leader = {}, 0, None
+    for name in by_performance:
+        performance = records[name]["performance"]
+        if leader is None or performance <= leader - band:
+            current += 1
+            leader = performance
+        band_of[name] = current
+        records[name]["band"] = current
+
+    # Head-to-head is only meaningful among bots in the same band.
+    for name in names:
+        band_mates = [other for other in names
+                      if other != name and band_of[other] == band_of[name]]
+        records[name]["head_to_head"] = sum(pair_points[name][other] for other in band_mates)
 
     def ranking_key(name):
         record = records[name]
-        return (-round(record["total_score"] if quality is not None else record["performance_score"], 10),
-                -record["points"], -record["head_to_head"],
+        quality_score = record["quality_score"] if record["quality_score"] is not None else 0
+        return (record["band"], -quality_score, -record["head_to_head"],
                 -record["wins"], record["forfeits"])
 
     order = sorted(names, key=lambda name: (ranking_key(name), name))
     standings = []
     for position, name in enumerate(order, 1):
-        rank = standings[-1]["rank"] if standings and ranking_key(name) == ranking_key(order[position - 2]) else position
+        rank = (standings[-1]["rank"]
+                if standings and ranking_key(name) == ranking_key(order[position - 2])
+                else position)
         standings.append({"name": name, "rank": rank, **records[name]})
     return standings
 
 
 def run_tournament(paths, timeout=DEFAULT_TIMEOUT, paired_rounds=DEFAULT_PAIRED_ROUNDS,
-                   seed=None, quality=None, move_provider=None):
+                   seed=None, quality=None, move_provider=None, workers=DEFAULT_WORKERS):
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("timeout must be positive and finite")
     if type(paired_rounds) is not int or paired_rounds <= 0:
         raise ValueError("paired_rounds must be a positive integer")
+    if type(workers) is not int or workers <= 0:
+        raise ValueError("workers must be a positive integer")
     if seed is None:
         seed = secrets.token_hex(32)
     elif type(seed) is not str or not seed:
@@ -245,26 +282,42 @@ def run_tournament(paths, timeout=DEFAULT_TIMEOUT, paired_rounds=DEFAULT_PAIRED_
         raise ValueError("at least two bot files are required")
     names = [path.stem for path in bots]
     quality = validate_quality(names, quality)
-    games = []
-    for first, second in combinations(bots, 2):
+
+    def play_task(task):
+        first, second, index, o, x = task
         pair = (first.stem, second.stem)
-        for index in range(paired_rounds):
-            for o, x in ((first, second), (second, first)):
-                seat = f"O:{o.stem}|X:{x.stem}"
-                game_id = f"{first.stem}|{second.stem}|{index}|{seat}"
-                coin_seed = int(_derived_seed(seed, pair, index,
-                                              f"referee|{seat}"), 16)
-                def bot_seed_for(name, round_number):
-                    return _derived_seed(seed, pair, index,
-                                         f"bot|{seat}|{name}|{round_number}")
-                game = play_game(o, x, timeout, coin_seed, bot_seed_for,
-                                 move_provider=move_provider, game_id=game_id)
-                game["pair_index"] = index
-                games.append(game)
+        seat = f"O:{o.stem}|X:{x.stem}"
+        game_id = f"{first.stem}|{second.stem}|{index}|{seat}"
+        coin_seed = int(_derived_seed(seed, pair, index, f"referee|{seat}"), 16)
+
+        def bot_seed_for(name, round_number):
+            return _derived_seed(seed, pair, index,
+                                 f"bot|{seat}|{name}|{round_number}")
+
+        game = play_game(o, x, timeout, coin_seed, bot_seed_for,
+                         move_provider=move_provider, game_id=game_id)
+        game["pair_index"] = index
+        return game
+
+    tasks = [(first, second, index, o, x)
+             for first, second in combinations(bots, 2)
+             for index in range(paired_rounds)
+             for o, x in ((first, second), (second, first))]
+    if workers > 1:
+        # Games are independent: each derives its own seeds, so results do not
+        # depend on execution order. Parallelism only changes wall-clock time.
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            games = list(executor.map(play_task, tasks))
+    else:
+        games = [play_task(task) for task in tasks]
+    games.sort(key=lambda game: game["game_id"])
     return {
         "rules": "simultaneous-coin-v2",
+        "scoring": SCORING,
         "timeout_seconds": timeout,
         "paired_rounds": paired_rounds,
+        "workers": workers,
+        "band_half_width": band_half_width(2 * paired_rounds * (len(names) - 1)),
         "tournament_seed": seed,
         "games": games,
         "standings": standings_for(names, games, paired_rounds, quality),
@@ -275,6 +328,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT)
     parser.add_argument("--paired-rounds", type=int, default=DEFAULT_PAIRED_ROUNDS)
+    parser.add_argument("--workers", type=int, default=DEFAULT_WORKERS,
+                        help="games played in parallel (raise on a many-core judge)")
     parser.add_argument("--seed", help="optional repeatable local seed, e.g. demo")
     parser.add_argument("--quality", type=Path, help="JSON scorecard, 0–20 human-assessed points")
     parser.add_argument("--rescore", type=Path,
@@ -285,6 +340,8 @@ def main():
         parser.error("--timeout must be a positive finite number")
     if args.paired_rounds <= 0:
         parser.error("--paired-rounds must be positive")
+    if args.workers <= 0:
+        parser.error("--workers must be positive")
     try:
         quality = json.loads(args.quality.read_text(encoding="utf-8")) if args.quality else None
         if args.rescore:
@@ -305,23 +362,24 @@ def main():
             if len(bots) < 2:
                 parser.error("the bots directory needs at least two .py files")
             print("Local tester only: do not judge untrusted submissions with this command.")
-            results = run_tournament(bots, args.timeout, args.paired_rounds, args.seed, quality)
+            results = run_tournament(bots, args.timeout, args.paired_rounds, args.seed,
+                                     quality, workers=args.workers)
     except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
         parser.error(str(error))
     for game in results["games"]:
         outcome = game["winner"] or "draw"
         print(f"{game['first']} (O) vs {game['second']} (X): {outcome} "
               f"({game['reason']}; {game['round_count']} rounds)")
-    print("\nRank  Bot                      Points  W  D  L  Forfeits  Perf/80  Quality/20  Total")
+    print(f"\nBand half-width = {results['band_half_width']:.3f} points/game "
+          f"(bots within a band are statistically tied; quality orders them)")
+    print("Rank  Band  Bot                      Points   W  D  L  Forf   Perf   Quality/20")
     for entry in results["standings"]:
         quality_display = (str(entry["quality_score"]) if entry["quality_score"] is not None
                            else "-")
-        total_display = (f"{entry['total_score']:.2f}" if entry["total_score"] is not None
-                         else "-")
-        print(f"{entry['rank']:>4}  {entry['name']:<24} {entry['points']:>5.1f}  "
-              f"{entry['wins']:>1}  {entry['draws']:>1}  {entry['losses']:>1}  "
-              f"{entry['forfeits']:>8}  {entry['performance_score']:>7.2f}  "
-              f"{quality_display:>10}  {total_display:>5}")
+        print(f"{entry['rank']:>4}  {entry['band']:>4}  {entry['name']:<24} "
+              f"{entry['points']:>6.1f}  {entry['wins']:>1}  {entry['draws']:>1}  "
+              f"{entry['losses']:>1}  {entry['forfeits']:>4}  {entry['performance']:>5.3f}  "
+              f"{quality_display:>10}")
     args.log.write_text(json.dumps(results, indent=2) + "\n", encoding="utf-8")
     print(f"Referee seed (keep private until results are final): {results['tournament_seed']}")
     print(f"Full round and coin logs: {args.log}")
