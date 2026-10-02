@@ -23,7 +23,7 @@ sys.path.insert(0, str(BASE))  # Single-file bots can import Action and GameStat
 from Action import Action
 from GameState import GameState
 
-DEFAULT_TIMEOUT = 1.5  # Wall-clock seconds per move, including worker startup.
+DEFAULT_TIMEOUT = 2.5  # Wall-clock seconds per choice, including worker startup.
 DEFAULT_PAIRED_ROUNDS = 10  # 20 games per unordered pair.
 OUTPUT_LIMIT = 8192
 BOT_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,59}\.py\Z")
@@ -221,13 +221,11 @@ def standings_for(names, games, paired_rounds=DEFAULT_PAIRED_ROUNDS, quality=Non
 
 
 def run_tournament(paths, timeout=DEFAULT_TIMEOUT, paired_rounds=DEFAULT_PAIRED_ROUNDS,
-                   seed=None, quality=None, move_provider=None, strict_seed=False):
+                   seed=None, quality=None, move_provider=None):
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError("timeout must be positive and finite")
     if type(paired_rounds) is not int or paired_rounds <= 0:
         raise ValueError("paired_rounds must be a positive integer")
-    if strict_seed and seed is not None:
-        raise ValueError("official events generate their own secret seed")
     if seed is None:
         seed = secrets.token_hex(32)
     elif type(seed) is not str or not seed:
@@ -275,7 +273,6 @@ def run_tournament(paths, timeout=DEFAULT_TIMEOUT, paired_rounds=DEFAULT_PAIRED_
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--bots-dir", type=Path, default=BASE / "bots")
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT)
     parser.add_argument("--paired-rounds", type=int, default=DEFAULT_PAIRED_ROUNDS)
     parser.add_argument("--seed", help="optional repeatable local seed, e.g. demo")
@@ -302,9 +299,12 @@ def main():
             results["standings"] = standings_for(
                 names, results["games"], results["paired_rounds"], quality)
         else:
-            bots = sorted(args.bots_dir.glob("*.py"))
+            # The CLI is a local student tester. Official entry selection uses
+            # an organizer-only hashed roster, not this folder/glob.
+            bots = sorted((BASE / "bots").glob("*.py"))
             if len(bots) < 2:
                 parser.error("the bots directory needs at least two .py files")
+            print("Local tester only: do not judge untrusted submissions with this command.")
             results = run_tournament(bots, args.timeout, args.paired_rounds, args.seed, quality)
     except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
         parser.error(str(error))

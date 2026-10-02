@@ -19,7 +19,7 @@ def verify_signature(payload, signature, key_hex):
         raise ValueError("signed result does not match the organizer key")
 
 
-def verify(results, seed=None):
+def verify(results, seed=None, allow_embedded_seed=False):
     if results.get("rules") != "simultaneous-coin-v2":
         raise ValueError("this log is not a simultaneous-coin-v2 tournament")
     names = [record["name"] for record in results["standings"]]
@@ -27,6 +27,8 @@ def verify(results, seed=None):
         raise ValueError("invalid participant list")
     paired_rounds = results["paired_rounds"]
     if seed is None:
+        if not allow_embedded_seed:
+            raise ValueError("provide an out-of-band seed, or explicitly allow the embedded seed for local logs")
         seed = results.get("tournament_seed")
     if type(seed) is not str or len(seed) != 64:
         raise ValueError("provide the organizer's 64-character seed out of band")
@@ -99,18 +101,23 @@ def main():
     parser.add_argument("results", type=Path, help="JSON file saved by main.py")
     parser.add_argument("--seed-file", type=Path,
                         help="organizer-only seed file; overrides a seed in the JSON")
+    parser.add_argument("--allow-embedded-seed", action="store_true",
+                        help="local consistency check only; does not authenticate a log")
     parser.add_argument("--signature", type=Path, help="optional official .hmac file")
     parser.add_argument("--key-file", type=Path, help="organizer HMAC key revealed after judging")
     args = parser.parse_args()
     if bool(args.signature) != bool(args.key_file):
         parser.error("--signature and --key-file must be provided together")
+    if not args.seed_file and not args.allow_embedded_seed:
+        parser.error("provide --seed-file, or --allow-embedded-seed for local testing")
     try:
         seed = args.seed_file.read_text(encoding="ascii").strip() if args.seed_file else None
         raw = args.results.read_bytes()
         if args.signature:
             verify_signature(raw, args.signature.read_text(encoding="ascii"),
                              args.key_file.read_text(encoding="ascii"))
-        count = verify(json.loads(raw), seed=seed)
+        count = verify(json.loads(raw), seed=seed,
+                       allow_embedded_seed=args.allow_embedded_seed)
     except (OSError, ValueError, KeyError, TypeError) as error:
         parser.error(str(error))
     print(f"Verified {count} games: pairings, referee coins, boards and standings match.")
