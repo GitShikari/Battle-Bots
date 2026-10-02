@@ -51,11 +51,11 @@ It always picks the first free square. It is legal, but predictable and easy to 
 | `gamestate.pieces` | Nine integers: `0` empty, `1` **your** mark, `2` the opponent's, regardless of whether the log calls you O or X. |
 | `gamestate.round_number` | Number of completed rounds, beginning at `0`. |
 
-Bot standard output is suppressed. The example bot averages the result of a choice over the opponent's possible choices, treating a same-square coin as 50/50; it is a starting point, not a perfect strategy. Plain alternating-turn tic-tac-toe minimax does **not** model simultaneous choices or the referee's coin.
+Bot standard output is suppressed. The starter `example-bot.py` only builds its own lines and ignores the opponent, so it is intentionally beatable. Plain alternating-turn tic-tac-toe minimax does **not** model simultaneous choices or the referee's coin, so do not copy one in unchanged. [HINTS.md](HINTS.md) describes the stronger ideas (averaging over the opponent and the coin, then looking one round ahead) — we do not ship those bots, so building them is the challenge.
 
 ## Reference bots and hints
 
-`bot-tester/bots/` contains a small ladder, easiest first. Play against them, beat them, then climb. Read [HINTS.md](HINTS.md) for the ideas behind each rung and how to go beyond them.
+`bot-tester/bots/` contains a small ladder, easiest first. Play against them, beat them, then climb. Read [HINTS.md](HINTS.md) for the ideas behind each rung and how to go beyond them. The stronger bots are **not** shipped — discovering those ideas is the challenge.
 
 | Bot | Idea | Its weakness |
 | --- | --- | --- |
@@ -63,7 +63,6 @@ Bot standard output is suppressed. The example bot averages the result of a choi
 | `first-empty-bot.py` | always the lowest empty square | completely predictable |
 | `greedy-bot.py` | build your own lines, ignore the opponent | no defence |
 | `win-block-bot.py` | win if you can, else collide with their winning square | a collision is only a 50/50 coin |
-| `tactical-bot.py` | average over the opponent's moves and the coin | looks only one round ahead |
 
 ## Test locally
 

@@ -6,6 +6,11 @@ tic-tac-toe on a 3x3 board. This file is a complete, working example with
 comments explaining every line, including some Python basics. Copy it, rename
 it to teamname_bot.py, and change the parts you want.
 
+This starter is deliberately simple: it builds its OWN lines and does not think
+about the opponent. That is a decent start, but it is beatable. Open HINTS.md to
+see the next steps (averaging over the opponent's move, the coin, and looking
+one round ahead).
+
 --------------------------------------------------------------------------
 THE GAME IN A NUTSHELL
 --------------------------------------------------------------------------
@@ -70,11 +75,11 @@ A 60-SECOND PYTHON PRIMER (skip if you already know this)
   object is created.
 * Methods are just functions that live inside a class and take self first.
 
-You may also see older example bots that write `class Player(Thread)` and
-`super().__init__()`. That version inherited from Python's threading library,
-which this competition used to need. It does not need it anymore: the runner
-simply calls run() for you. A plain class like the one below is enough, so you
-can ignore Thread entirely.
+Your class does not need to inherit from anything here. The runner creates
+`Player(gamestate)` and calls `run()` directly. Inheritance (for example
+`class Player(Thread):`, or a `super().__init__()` call) belongs to Python's
+threading library and is not needed for this competition, so a plain class like
+the one below is enough.
 """
 
 # Importing gives us names defined in another file. `Action` is the small
@@ -83,36 +88,27 @@ from Action import Action
 
 
 # The eight winning lines, written as triples of square numbers. We reuse this
-# in the scoring helper below.
+# below.
 LINES = ((0, 1, 2), (3, 4, 5), (6, 7, 8),   # rows
          (0, 3, 6), (1, 4, 7), (2, 5, 8),   # columns
          (0, 4, 8), (2, 4, 6))              # diagonals
 
 
-def line_score(board):
-    """Give a rough score to a board from OUR point of view.
+def own_score(board):
+    """Score how good a board is for US, ignoring the opponent.
 
-    board is a list of nine numbers (0 empty, 1 ours, 2 theirs). Bigger is
-    better for us. We give a large bonus for a completed line and otherwise
-    count how many of our marks sit in lines the opponent has not blocked.
-
-    This is only a heuristic (a rule of thumb) -- it is not exact, but it is a
-    good enough judge of "is this position promising?" for a starter bot.
+    board is a list of nine numbers (0 empty, 1 ours, 2 theirs). This counts how
+    many of our marks sit in each line that the opponent has not blocked; a line
+    with more of our marks is worth more. It is only a rule of thumb.
     """
-    for line in LINES:
-        if all(board[i] == 1 for i in line):
-            return 10.0      # we have three in a line: excellent
-        if all(board[i] == 2 for i in line):
-            return -10.0     # they have three in a line: terrible
-
-    score = 0.0
+    total = 0
     for line in LINES:
         cells = [board[i] for i in line]
-        if 2 not in cells:           # they are not blocking this line
-            score += cells.count(1)  # each of our marks here is useful
-        if 1 not in cells:           # we are not blocking this line
-            score -= cells.count(2)  # each of their marks here is dangerous
-    return score / 10.0
+        if 2 in cells:
+            continue                        # the opponent blocks this line
+        # 0, 1, 2 or 3 of our marks is worth 0, 1, 3 or 10 points.
+        total += (0, 1, 3, 10)[cells.count(1)]
+    return total
 
 
 class Player:
@@ -120,8 +116,7 @@ class Player:
 
     def __init__(self, gamestate):
         # __init__ runs when the runner builds Player(gamestate). Store what we
-        # were given and give self.action a safe placeholder. act() will replace
-        # it with the real move.
+        # were given and give self.action a safe placeholder. act() replaces it.
         self.gamestate = gamestate
         self.action = Action(-1)
 
@@ -130,37 +125,23 @@ class Player:
         self.act(self.gamestate)
 
     def act(self, gamestate):
-        # 1. Find the squares that are still free.
-        board = gamestate.pieces               # the nine board numbers
-        empty = [i for i in range(9) if board[i] == 0]
+        board = gamestate.pieces
 
-        # 2. For each square we might pick, work out how good it usually is.
-        #    "Usually" means: average over every square the opponent might pick,
-        #    and, if we pick the same square, average over both coin results.
-        #    This is the key idea of the game and is called *expected value*.
-        results = []                            # one number per candidate square
-        for mine in empty:
-            total = 0.0
-            for theirs in empty:
-                if mine == theirs:
-                    # A collision: half the time we get the square, half the
-                    # time they do. Try both and average.
-                    ours = board.copy()
-                    ours[mine] = 1
-                    theirs_board = board.copy()
-                    theirs_board[mine] = 2
-                    total += (line_score(ours) + line_score(theirs_board)) / 2
-                else:
-                    # No collision: both marks go down. Score the result.
-                    after = board.copy()
-                    after[mine] = 1
-                    after[theirs] = 2
-                    total += line_score(after)
-            results.append(total / len(empty))  # average over all opponent picks
+        # Try every free square, score our position after placing there, and
+        # keep the best one.
+        best_square = None
+        best_value = None
+        for square in range(9):
+            if board[square] != 0:
+                continue                        # not empty: skip it
+            trial = board.copy()                # a copy we can edit safely
+            trial[square] = 1                   # pretend we place here
+            value = own_score(trial)
+            if best_value is None or value > best_value:
+                best_value = value
+                best_square = square
 
-        # 3. Choose the square with the best average. If several tie, pick one
-        #    at random so we are not perfectly predictable.
-        best = max(results)
-        best_moves = [move for move, value in zip(empty, results) if value >= best - 1e-9]
-        import random                            # standard library; safe to use
-        self.action = Action(random.choice(best_moves))
+        # HINT: this never considers the opponent's move or the coin. Averaging
+        # over what they might do -- and treating a same-square pick as a 50/50
+        # coin -- is the next step. See HINTS.md.
+        self.action = Action(best_square)

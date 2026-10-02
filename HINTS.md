@@ -24,7 +24,8 @@ is that it never thinks about the opponent.
 ## Rung 3 — respect the opponent
 You and your opponent choose **at the same time**, so you cannot react. Instead,
 for each square you might pick, ask what happens for *every* square they might
-pick, and take the best average. `example-bot.py` / `tactical-bot.py` do this.
+pick, and take the best average. We do not ship a bot for this rung — writing it
+yourself is the first real jump. `example-bot.py` only does rung 2.
 
 ## Rung 4 — treat a collision as a coin
 If you and the opponent pick the same square, a fair coin decides who gets it.

@@ -47,8 +47,8 @@ print(d.speak())                # "Rex says woof"
 - A **method** is a function inside a class. It always takes `self` first when
   you define it, but you do **not** pass `self` when you call it: `d.speak()`.
 - **Inheritance** is when one class builds on another, e.g.
-  `class Player(Thread):`. Older examples used it; this competition no longer
-  needs it, so a plain `class Player:` is all you need.
+  `class Player(Thread):`. You do not need it here: a plain `class Player:` with
+  the methods below is all the runner asks for.
 
 ## The Player skeleton you must provide
 

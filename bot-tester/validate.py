@@ -31,8 +31,8 @@ def check_bot(path, timeout=DEFAULT_TIMEOUT):
                 raise ValueError(f"{label}, perspective {player}: illegal choice {move}")
 
     samples = Path(__file__).resolve().parent / "bots"
-    opponent = samples / ("random-bot.py" if path.stem == "tactical-bot" else
-                          "tactical-bot.py")
+    opponent = samples / ("random-bot.py" if path.stem == "win-block-bot" else
+                          "win-block-bot.py")
     for first, second in ((path, opponent), (opponent, path)):
         game = play_game(first, second, timeout, coin_seed=7)
         if path.stem in game["forfeits"]:
