@@ -81,11 +81,13 @@ The local tester runs files in `bot-tester/bots/` as ordinary Python processes w
 
 ## Submission: code **and** strategy PDF
 
-Send **both** `teamname_bot.py` and `teamname_strategy.pdf` through the submission link announced by the coordinators. The PDF should be at most **two pages**. In your own words, explain:
+Send **both** your Python bot (one `.py` file) and a strategy PDF through the submission form (see **Submission details** below). Name the file whatever you like — `teamname_bot.py` is just a placeholder. Humour us. (Extra points, maybe. idk.)
+
+In the PDF, in your own words, explain:
 
 - How your bot chooses a square, including what it assumes about the other bot and how it treats collisions/coin outcomes.
 - Which ideas you tried, what changed while testing, and at least one weakness or edge case you noticed.
-- How you tested it (for example, both O/X labels, different opponents, or repeatable seeds). A brief explanation and small example are enough; fancy diagrams and advanced algorithms are not required.
+- How you tested it (for example, both O/X labels, different opponents, or repeatable seeds). A couple of lines is enough; fancy diagrams and advanced algorithms are not required.
 
 AI coding assistance is allowed. We evaluate the behavior, the code and your ability to explain the decisions—not a guess about whether you used an AI tool.
 The sample bots use only the Python standard library; no third-party package is guaranteed on the judging machine. Your script must be self-contained apart from the provided `Action` and `GameState` modules.
@@ -109,7 +111,8 @@ Remaining ties (same band and quality): head-to-head points, then wins, then few
 
 ## Submission details
 
-- Submission link: **to be announced**.
-- Submission deadline and time zone: **to be announced**.
-- Tournament and results timeline: **to be announced**.
-- Prizes and participation details: **to be announced**.
+- Submission form: **https://forms.gle/f8yUyEcGFtcsEeFR6**
+- Submissions are open now and close **strictly on 10 October, 11:59 PM**.
+- Open to all freshers.
+- **Exciting goodies for the top 3 participants.**
+- Rules, bot API, examples and local testing are all in this README.
